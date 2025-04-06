@@ -75,7 +75,7 @@ app.post('/cake', upload.single('image'), async (req, res) => {
 
 // Регистрация пользователя
 app.post('/register', async (req, res) => {
-  const { name, surname, email, password } = req.body;
+  const { name, surname, email, password, kraj, miasto, ulica, nrdomu, telefon } = req.body;
 
   try {
     // Хэшируем пароль
@@ -91,6 +91,13 @@ app.post('/register', async (req, res) => {
     const newUser = await pool.query(
       'INSERT INTO users (imie, nazwisko, email, password) VALUES ($1, $2, $3, $4) RETURNING *',
       [name, surname, email, hashedPassword]
+    );
+
+    // Добавляем информацию о пользователе в таблицу user_info
+    const userId = newUser.rows[0].user_id;
+    await pool.query(
+      'INSERT INTO user_info (user_id, kraj, miasto, ulica, nrdomu, telefon) VALUES ($1, $2, $3, $4, $5, $6)',
+      [userId, kraj, miasto, ulica, nrdomu, telefon]
     );
     
     res.json({ success: true, user: newUser.rows[0] });
@@ -160,6 +167,78 @@ app.get('/user', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Error fetching user data' });
+  }
+});
+
+// API: Получить полную информацию о пользователе
+app.get('/user-info', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1]; // Извлекаем токен из заголовка Authorization
+
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, 'your-secret-key'); // Декодируем токен, чтобы получить информацию о пользователе
+    const userId = decoded.userId; // Получаем userId из токена
+
+    // Запрашиваем полную информацию о пользователе
+    const result = await pool.query(
+      'SELECT users.imie, users.nazwisko, users.email, user_info.kraj, user_info.miasto, user_info.ulica, user_info.nrdomu, user_info.telefon ' +
+      'FROM users ' +
+      'JOIN user_info ON users.user_id = user_info.user_id ' +
+      'WHERE users.user_id = $1',
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'User info not found' });
+    }
+
+    res.json({
+      success: true,
+      userInfo: result.rows[0],
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Error fetching user info' });
+  }
+});
+
+// API: Обновить полную информацию о пользователе
+app.put('/user-info', async (req, res) => {
+  const { kraj, miasto, ulica, nrdomu, telefon } = req.body;
+  const token = req.headers.authorization?.split(' ')[1]; // Извлекаем токен из заголовка Authorization
+
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, 'your-secret-key'); // Декодируем токен, чтобы получить информацию о пользователе
+    const userId = decoded.userId; // Получаем userId из токена
+
+    // Проверяем, существует ли уже информация о пользователе в базе данных
+    const result = await pool.query('SELECT * FROM user_info WHERE user_id = $1', [userId]);
+
+    if (result.rows.length === 0) {
+      // Если информации нет, то вставляем новую
+      await pool.query(
+        'INSERT INTO user_info (user_id, kraj, miasto, ulica, nrdomu, telefon) VALUES ($1, $2, $3, $4, $5, $6)',
+        [userId, kraj, miasto, ulica, nrdomu, telefon]
+      );
+    } else {
+      // Если информация уже есть, обновляем её
+      await pool.query(
+        'UPDATE user_info SET kraj = $1, miasto = $2, ulica = $3, nrdomu = $4, telefon = $5 WHERE user_id = $6',
+        [kraj, miasto, ulica, nrdomu, telefon, userId]
+      );
+    }
+
+    res.json({ success: true, message: 'User info updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Error updating user info' });
   }
 });
 
